@@ -2,6 +2,7 @@ local SERVER_URL = "http://snowgirl.zki.lol/log"
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local TextChatService = game:GetService("TextChatService")
+local LocalPlayer = Players.LocalPlayer
 local jobId = (game.JobId ~= "") and game.JobId or "Studio-Testing-ID"
 
 local function sendWebhookPayload(payloadType, extraData)
@@ -16,35 +17,44 @@ local function sendWebhookPayload(payloadType, extraData)
     end)
 end
 
--- Initialize server log
 sendWebhookPayload("join")
 
--- Helper function to find a player by their display name or name
-local function findSender(prefix)
-    -- Clean up prefix characters commonly added by chat prefixes
+local function findSender(prefix, textChatMessage)
+    -- First, check if TextSource tells us it's the local player
+    if textChatMessage and textChatMessage.TextSource then
+        if textChatMessage.TextSource.UserId == LocalPlayer.UserId then
+            return LocalPlayer
+        end
+    end
+
+    -- Fallback to scanning the player roster via prefix text
     local cleanPrefix = string.gsub(prefix, "[%[%]:%s]", "")
     for _, p in ipairs(Players:GetPlayers()) do
         if p.DisplayName == cleanPrefix or p.Name == cleanPrefix then
             return p
         end
     end
+    
     return nil
 end
 
--- Hook into TextChatService optimized for LocalScripts
 if TextChatService and TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
     TextChatService.MessageReceived:Connect(function(textChatMessage)
         pcall(function()
             local rawText = textChatMessage.Text
-            local prefix = textChatMessage.PrefixText -- This is usually "[DisplayName]:"
+            local prefix = textChatMessage.PrefixText or ""
             
-            local sender = findSender(prefix)
+            local sender = findSender(prefix, textChatMessage)
+            
+            -- If it's empty prefix or still unresolved but matches nothing, default to local player checks
+            if not sender and (prefix == "" or string.find(prefix, LocalPlayer.DisplayName) or string.find(prefix, LocalPlayer.Name)) then
+                sender = LocalPlayer
+            end
+            
             local formattedMessage
-            
             if sender then
                 formattedMessage = string.format("[%s] (@%s): %s", sender.DisplayName, sender.Name, rawText)
             else
-                -- Fallback if player object isn't resolved instantly
                 formattedMessage = string.format("%s %s", prefix, rawText)
             end
             
@@ -52,7 +62,6 @@ if TextChatService and TextChatService.ChatVersion == Enum.ChatVersion.TextChatS
         end)
     end)
 else
-    -- Legacy Chat Engine Hook (Always works perfectly on client)
     local function hookPlayer(player)
         player.Chatted:Connect(function(message)
             local formattedMessage = string.format("[%s] (@%s): %s", player.DisplayName, player.Name, message)
