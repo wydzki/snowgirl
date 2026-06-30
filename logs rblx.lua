@@ -39,7 +39,7 @@ sendWebhookPayload("join")
 
 -- --- CHAT PROCESSING CHANNELS ---
 
-local function format AndSendChat(player, rawMessage)
+local function formatAndSendChat(player, rawMessage)
     if not player then return end
     
     -- Format: [DisplayName] (@Username): Message
