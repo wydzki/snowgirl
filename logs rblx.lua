@@ -1,49 +1,78 @@
--- Local Script (Delta Executor)
-local LogService = game:GetService("LogService")
+-- --- CONFIGURATION ---
+local SERVER_URL = "http://snowgirl.zki.lol/log"
+
+-- --- SERVICES ---
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
 
-local VPS_URL = "https://snowgirl.zki.lol/log"
-local JobId = game.JobId
+local jobId = game.JobId ~= "" and game.JobId or "Studio-Testing-ID"
 
--- Notify VPS that a new server was joined
-local function notifyServerJoin()
-    local payload = {
-        type = "join",
-        jobId = JobId,
-        placeId = game.PlaceId
+-- --- HELPERS ---
+local function sendWebhookPayload(payloadType, extraData)
+    local data = {
+        type = payloadType,
+        jobId = jobId
     }
     
-    pcall(function()
-        request({
-            Url = VPS_URL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode(payload)
-        })
+    if extraData then
+        for k, v in pairs(extraData) do
+            data[k] = v
+        end
+    end
+
+    local success, jsonPayload = pcall(function()
+        return HttpService:JSONEncode(data)
+    end)
+
+    if not success then return end
+
+    task.spawn(function()
+        pcall(function()
+            HttpService:PostAsync(SERVER_URL, jsonPayload, Enum.HttpContentType.ApplicationJson)
+        end)
     end)
 end
 
--- Listen to chat messages via LogService (captures standard chat)
-LogService.MessageOut:Connect(function(message, messageType)
-    if messageType == Enum.MessageType.MessageOutput or string.find(message, ":") then
-        -- Simple check to filter out system spam if needed, or grab everything
-        local payload = {
-            type = "chat",
-            jobId = JobId,
-            message = message
-        }
-        
-        pcall(function()
-            request({
-                Url = VPS_URL,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode(payload)
-            })
+-- --- INITIALIZATION LOG ---
+sendWebhookPayload("join")
+
+-- --- CHAT PROCESSING CHANNELS ---
+
+local function format AndSendChat(player, rawMessage)
+    if not player then return end
+    
+    -- Format: [DisplayName] (@Username): Message
+    local formattedMessage = string.format("[%s] (@%s): %s", 
+        player.DisplayName, 
+        player.Name, 
+        rawMessage
+    )
+    
+    sendWebhookPayload("chat", { message = formattedMessage })
+end
+
+-- 1. Modern Chat Engine (TextChatService)
+if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+    TextChatService.MessageReceived:Connect(function(textChatMessage)
+        local textSource = textChatMessage.TextSource
+        if textSource then
+            local player = Players:GetPlayerByUserId(textSource.UserId)
+            formatAndSendChat(player, textChatMessage.Text)
+        end
+    end)
+else
+    -- 2. Legacy Chat Engine Fallback (LegacyChatService)
+    local function hookPlayer(player)
+        player.Chatted:Connect(function(message)
+            formatAndSendChat(player, message)
         end)
     end
-end)
 
--- Run on startup
-notifyServerJoin()
+    Players.PlayerAdded:Connect(hookPlayer)
+    for _, player in ipairs(Players:GetPlayers()) do
+        hookPlayer(player)
+    end
+end
+
+print("[LOGGER ACTIVE] Enhanced identity tracker running.")
